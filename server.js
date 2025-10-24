@@ -17,19 +17,26 @@ connectDB();
 app.use(helmet());
 
 const allowedOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim())
+  ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim()).filter(Boolean)
   : ['http://localhost:5174'];
+
+console.log('Allowed origins:', allowedOrigins);  // Startup log for verification
 
 app.use(
   cors({
     origin: function (origin, callback) {
+      console.log('Request origin:', origin);  // Temporary debug log (remove in prod)
       if (!origin || allowedOrigins.includes(origin)) {
+        console.log('CORS allowed for origin:', origin || 'no-origin');  // Temporary debug log
         callback(null, true);
       } else {
+        console.log('CORS blocked for origin:', origin);  // Temporary debug log
         callback(new Error('Not allowed by CORS'));
       }
     },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],  // Explicit for preflight
+    allowedHeaders: ['Content-Type', 'Authorization'],    // Common headers; add more if needed
   })
 );
 
