@@ -272,9 +272,8 @@ const updateEvent = asyncHandler(async (req, res) => {
     throw error;
   }
 });
-// @desc    Delete event
-// @route   DELETE /api/events/:id
-// @access  Private/Admin
+
+
 const deleteEvent = asyncHandler(async (req, res) => {
   try {
     const event = await Event.findById(req.params.id);
