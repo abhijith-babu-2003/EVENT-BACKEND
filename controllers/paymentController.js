@@ -2,7 +2,7 @@
 const Stripe = require('stripe');
 const Event = require('../models/eventModal');
 const Booking = require('../models/bookingModal');
-
+  const User = require('../models/userModal'); 
 // ==================== Stripe Instance ====================
 let stripeInstance = null;
 function getStripe() {
@@ -184,6 +184,10 @@ exports.cancelBooking = async (req, res) => {
     const booking = await Booking.findById(id);
     if (!booking) return res.status(404).json({ message: 'Booking not found' });
 
+    // Debug logs
+    console.log('Booking payment status:', booking.paymentStatus);
+    console.log('Booking total price:', booking.totalPrice);
+
     const ownsByUser = userId && booking.user && String(booking.user) === String(userId);
     const ownsByEmail = userEmail && booking.customerEmail === userEmail;
     if (!ownsByUser && !ownsByEmail) {
@@ -192,6 +196,36 @@ exports.cancelBooking = async (req, res) => {
 
     if (booking.paymentStatus === 'canceled') {
       return res.status(200).json({ booking, alreadyCanceled: true });
+    }
+
+    // Check if booking was paid - be more flexible with payment status
+    const wasPaid = booking.paymentStatus === 'completed' || 
+                    booking.paymentStatus === 'pending' ||
+                    booking.paymentStatus === 'success' ||
+                    booking.paymentStatus === 'paid';
+    
+    console.log('Was paid:', wasPaid);
+    
+    let refundAmount = 0;
+    let updatedWalletBalance = 0;
+    
+    // Process refund if there's a total price (regardless of payment status for now)
+    if (booking.totalPrice > 0) {
+      const updateQuery = userId ? { _id: userId } : { email: userEmail };
+      const user = await User.findOne(updateQuery);
+      
+      console.log('User found:', !!user);
+      console.log('Current wallet balance:', user?.walletBalance);
+      
+      if (user) {
+        user.walletBalance = (user.walletBalance || 0) + booking.totalPrice;
+        await user.save();
+        refundAmount = booking.totalPrice;
+        updatedWalletBalance = user.walletBalance;
+        
+        console.log('New wallet balance:', updatedWalletBalance);
+        console.log('Refund amount:', refundAmount);
+      }
     }
 
     // Rollback seats
@@ -206,9 +240,15 @@ exports.cancelBooking = async (req, res) => {
     }
 
     booking.paymentStatus = 'canceled';
+    booking.refundAmount = refundAmount;
     await booking.save();
 
-    return res.status(200).json({ booking });
+    return res.status(200).json({ 
+      booking, 
+      refunded: refundAmount > 0,
+      refundAmount,
+      walletBalance: updatedWalletBalance
+    });
   } catch (err) {
     console.error('cancelBooking error:', err?.message);
     return res.status(500).json({ message: 'Failed to cancel booking' });
