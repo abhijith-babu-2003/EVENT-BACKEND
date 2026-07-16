@@ -18,25 +18,21 @@ app.use(helmet());
 
 const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map(origin => origin.trim()).filter(Boolean)
-  : ['http://localhost:5173'];
+  : ['http://localhost:5174'];
+
 
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin) return callback(null, true);
-
-      const isAllowedExact = allowedOrigins.includes(origin);
-      const isVercelPreview = /^https:\/\/event-frontend-[a-z0-9-]+\.vercel\.app$/.test(origin);
-
-      if (isAllowedExact || isVercelPreview) {
+      if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));
       }
     },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], 
+    allowedHeaders: ['Content-Type', 'Authorization'],   
   })
 );
 
