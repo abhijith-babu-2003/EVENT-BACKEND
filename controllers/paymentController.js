@@ -1,4 +1,3 @@
-// ==================== Requires ====================
 const Stripe = require('stripe');
 const Event = require('../models/eventModal');
 const Booking = require('../models/bookingModal');
@@ -15,18 +14,14 @@ function getStripe() {
   }
   return stripeInstance;
 }
-
 // ==================== Controllers ====================
-
 // Create PaymentIntent
 exports.createPaymentIntent = async (req, res, next) => {
   try {
     const { amount, currency = 'inr', metadata = {} } = req.body || {};
-
     if (!amount || amount <= 0) {
       return res.status(400).json({ message: 'Invalid amount' });
     }
-
     const stripe = getStripe();
     const paymentIntent = await stripe.paymentIntents.create({
       amount,
@@ -34,7 +29,6 @@ exports.createPaymentIntent = async (req, res, next) => {
       automatic_payment_methods: { enabled: true },
       metadata,
     });
-
     return res.status(200).json({ clientSecret: paymentIntent.client_secret });
   } catch (err) {
     console.error('Stripe createPaymentIntent error:', err);
@@ -44,7 +38,6 @@ exports.createPaymentIntent = async (req, res, next) => {
     return res.status(500).json({ message });
   }
 };
-
 // Confirm Payment and Create Booking
 exports.confirmAndCreateBooking = async (req, res) => {
   const stripe = getStripe();
@@ -53,7 +46,6 @@ exports.confirmAndCreateBooking = async (req, res) => {
     if (!paymentIntentId) {
       return res.status(400).json({ message: 'paymentIntentId is required' });
     }
-
     // Retrieve PI from Stripe
     const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
     if (!pi) {
@@ -62,7 +54,6 @@ exports.confirmAndCreateBooking = async (req, res) => {
     if (pi.status !== 'succeeded') {
       return res.status(400).json({ message: `Payment not succeeded. Current status: ${pi.status}` });
     }
-
     // Extract metadata
     const meta = pi.metadata || {};
     const eventId = meta.eventId;
@@ -70,10 +61,8 @@ exports.confirmAndCreateBooking = async (req, res) => {
     const qty = Number(meta.qty || 0);
     const currency = pi.currency || 'inr';
     const totalAmountMinor = pi.amount_received || pi.amount || 0;
-
     let receiptEmail = pi.receipt_email;
     let billingName = undefined;
-
     if (!receiptEmail && pi.latest_charge) {
       try {
         const charge = await stripe.charges.retrieve(pi.latest_charge);
@@ -84,24 +73,20 @@ exports.confirmAndCreateBooking = async (req, res) => {
       }
     }
     if (!receiptEmail) receiptEmail = 'unknown@example.com';
-
     if (!eventId || !section || !qty) {
       console.error('Missing PI metadata:', { eventId, section, qty });
       return res.status(400).json({ message: 'Missing booking metadata on PaymentIntent' });
     }
-
     // Idempotency check
     const existing = await Booking.findOne({ paymentIntentId });
     if (existing) {
       return res.status(200).json({ booking: existing, duplicate: true });
     }
-
     // Update event seats
     const event = await Event.findById(eventId);
     if (!event) {
       return res.status(404).json({ message: 'Event not found' });
     }
-
     const seat = event.seats.find((s) => s.section === section);
     if (!seat) {
       return res.status(400).json({ message: 'Seat section not found on event' });
@@ -112,11 +97,9 @@ exports.confirmAndCreateBooking = async (req, res) => {
     seat.available -= qty;
     event.ticketsSold = (event.ticketsSold || 0) + qty;
     await event.save();
-
     const customerName =
       (meta.customerName && String(meta.customerName).trim()) || billingName || undefined;
     const userId = req.user?._id;
-
     // Create booking
     const booking = await Booking.create({
       event: event._id,
@@ -130,7 +113,6 @@ exports.confirmAndCreateBooking = async (req, res) => {
       paymentIntentId,
       paymentStatus: 'succeeded',
     });
-
     return res.status(201).json({ booking });
   } catch (err) {
     console.error('confirmAndCreateBooking error:', err?.message, err?.stack);
@@ -143,19 +125,16 @@ exports.confirmAndCreateBooking = async (req, res) => {
     return res.status(500).json({ message: 'Failed to confirm payment and create booking' });
   }
 };
-
 // Get My Bookings
 exports.getMyBookings = async (req, res) => {
   try {
     const userId = req.user?._id;
     const email = req.user?.email;
     if (!userId && !email) return res.status(401).json({ message: 'Unauthorized' });
-
     const or = [];
     if (userId) or.push({ user: userId });
     if (email) or.push({ customerEmail: email });
     const query = or.length ? { $or: or } : { _id: null };
-
     const bookings = await Booking.find(query)
       .populate({ 
         path: 'event', 
@@ -163,46 +142,39 @@ exports.getMyBookings = async (req, res) => {
       })
       .select('totalPrice quantity section paymentStatus createdAt paymentIntentId')
       .sort({ createdAt: -1 });
-
     return res.status(200).json({ bookings });
   } catch (err) {
     console.error('getMyBookings error:', err?.message);
     return res.status(500).json({ message: 'Failed to fetch bookings' });
   }
 };
-
 // Cancel Booking
 exports.cancelBooking = async (req, res) => {
   try {
     const userEmail = req.user?.email;
     const userId = req.user?._id;
     const { id } = req.params;
-
     if (!userEmail && !userId) return res.status(401).json({ message: 'Unauthorized' });
     if (!id) return res.status(400).json({ message: 'Booking ID is required' });
-
     const booking = await Booking.findById(id);
     if (!booking) return res.status(404).json({ message: 'Booking not found' });
-
     // Debug logs
     console.log('Booking payment status:', booking.paymentStatus);
     console.log('Booking total price:', booking.totalPrice);
-
     const ownsByUser = userId && booking.user && String(booking.user) === String(userId);
     const ownsByEmail = userEmail && booking.customerEmail === userEmail;
     if (!ownsByUser && !ownsByEmail) {
       return res.status(403).json({ message: 'Not allowed to cancel this booking' });
     }
-
     if (booking.paymentStatus === 'canceled') {
       return res.status(200).json({ booking, alreadyCanceled: true });
     }
-
     // Check if booking was paid - be more flexible with payment status
     const wasPaid = booking.paymentStatus === 'completed' || 
                     booking.paymentStatus === 'pending' ||
                     booking.paymentStatus === 'success' ||
-                    booking.paymentStatus === 'paid';
+                    booking.paymentStatus === 'paid' ||
+                    booking.paymentStatus === 'succeeded';
     
     console.log('Was paid:', wasPaid);
     
@@ -227,7 +199,6 @@ exports.cancelBooking = async (req, res) => {
         console.log('Refund amount:', refundAmount);
       }
     }
-
     // Rollback seats
     const event = await Event.findById(booking.event);
     if (event) {
@@ -238,11 +209,9 @@ exports.cancelBooking = async (req, res) => {
       event.ticketsSold = Math.max(0, (event.ticketsSold || 0) - booking.quantity);
       await event.save();
     }
-
     booking.paymentStatus = 'canceled';
     booking.refundAmount = refundAmount;
     await booking.save();
-
     return res.status(200).json({ 
       booking, 
       refunded: refundAmount > 0,
@@ -254,7 +223,6 @@ exports.cancelBooking = async (req, res) => {
     return res.status(500).json({ message: 'Failed to cancel booking' });
   }
 };
-
 // Admin: Get All Bookings
 exports.getAllBookingsAdmin = async (req, res) => {
   try {
@@ -262,27 +230,22 @@ exports.getAllBookingsAdmin = async (req, res) => {
       .populate({ path: 'event', select: 'eventName image date time location' })
       .populate({ path: 'user', select: 'name email' })
       .sort({ createdAt: -1 });
-
     return res.status(200).json({ bookings });
   } catch (err) {
     console.error('getAllBookingsAdmin error:', err?.message);
     return res.status(500).json({ message: 'Failed to fetch bookings' });
   }
 };
-
 // Admin: Cancel any Booking
 exports.adminCancelBooking = async (req, res) => {
   try {
     const { id } = req.params;
     if (!id) return res.status(400).json({ message: 'Booking ID is required' });
-
     const booking = await Booking.findById(id);
     if (!booking) return res.status(404).json({ message: 'Booking not found' });
-
     if (booking.paymentStatus === 'canceled') {
       return res.status(200).json({ booking, alreadyCanceled: true });
     }
-
     // Rollback seats
     const event = await Event.findById(booking.event);
     if (event) {
@@ -293,10 +256,8 @@ exports.adminCancelBooking = async (req, res) => {
       event.ticketsSold = Math.max(0, (event.ticketsSold || 0) - booking.quantity);
       await event.save();
     }
-
     booking.paymentStatus = 'canceled';
     await booking.save();
-
     return res.status(200).json({ booking });
   } catch (err) {
     console.error('adminCancelBooking error:', err?.message);
